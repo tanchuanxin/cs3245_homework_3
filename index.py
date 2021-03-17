@@ -5,6 +5,7 @@ import os
 import sys
 import getopt
 import pickle
+import math
 
 
 def usage():
@@ -43,27 +44,111 @@ class PostingsList:
             self.end = new_node  # Change last node in linked list
             self.doc_freq += 1  # Increment document frequency for this linked list
 
+    # Creates skip pointers within a completed postings list
+    def create_skip_ptrs(self):
+        skip_ptrs_num = int(math.sqrt(self.doc_freq))
+        skip_ptrs_interval = self.doc_freq // skip_ptrs_num
+
+        # If it's the only element in the postings list, we don't need skip pointers
+        if self.doc_freq <= 1:
+            skip_ptrs_num = 0
+
+        # Add skip pointers into linked list
+        skip_ptrs_added = 0
+
+        # Interval between prev and curr to see if we should add a skip pointer
+        interval = 0
+        curr_index = 0  # Checks which node we are at
+        prev_index = 0  # Tracks which node we are inserting the skip pointer for
+
+        curr = self.head
+        prev = curr
+
+        while curr != None:
+            # If added all skip pointers already, just end function
+            if skip_ptrs_added >= skip_ptrs_num:
+                break
+
+            # Add new skip pointer if interval matches or we are at the end of the linked list
+            if interval >= skip_ptrs_interval or curr == self.end:
+                prev.skip_ptr = curr  # Set prev's skip pointer to curr
+                prev = curr
+                prev_index = curr_index  # Update prev's new index to curr
+                skip_ptrs_added += 1
+                interval = 0  # Reset
+
+            # If we are not adding a skip pointer, simply increment curr
+            curr = curr.next
+            curr_index += 1
+
+            # Update interval
+            interval = curr_index - prev_index
+
+    # Prints out a postings list for debugging
+    def display(self):
+        curr = self.head
+        while curr.next != None:
+            print(
+                "{}, {}, ({})".format(curr.doc_id, curr.term_freq, curr.skip_ptr),
+                end=" | ",
+            )
+            curr = curr.next
+        if curr != None:
+            print("{}, {}, ({})".format(curr.doc_id, curr.term_freq, curr.skip_ptr))
+        print("=============================")
+
+
+# Takes in a PostingsList for a term and writes it out to our postings file
+# Returns an address to the PostingsList on disk
+def write_postings_list_to_disk(postings_list: PostingsList, out_postings):
+    # Open our postings file
+    f_postings = open(os.path.join(os.path.dirname(__file__), out_postings), "a+b")
+
+    # Get the byte offset of the final position in our postings file on disk
+    # This will be where the PostingsList is appended to
+    f_postings.seek(0, 2)  # Bring the pointer to the very end of the postings file
+    pointer = f_postings.tell()
+
+    # Writes out PostingsList for this term to postings file
+    pickle.dump(postings_list, f_postings)
+
+    # Close our postings file
+    f_postings.close()
+
+    # TODO: REMOVE THIS
+    # postings_list.display()
+
+    # Return address of PostingsList we just wrote out
+    return pointer
+
+
+# Writes our the term dictionary {term: Address of PostingsList for that term} to disk
+def write_dictionary_to_disk(term_dict: dict, out_dict):
+    # Open our dictionary file
+    f_dict = open(os.path.join(os.path.dirname(__file__), out_dict), "wb")
+
+    # Writes out the term dictionary to dictionary file
+    pickle.dump(term_dict, f_dict)
+
+    # Close our dictionary file
+    f_dict.close()
+
+    # TODO: REMOVE THIS
+    # for key in term_dict.keys():
+    #     print(key, term_dict[key])
+
 
 def build_index(in_dir, out_dict, out_postings):
     """
-    build index from documents stored in the input directory,
+    Build index from documents stored in the input directory,
     then output the dictionary file and postings file
     """
-    print("indexing...")
+    print("Indexing...")
 
     # Read in documents to index
     doc_ids = os.listdir(in_dir)  # Read in paths of all documents in the in_dir
     doc_ids = [int(doc_id) for doc_id in doc_ids]
     doc_ids.sort()
-
-    # Save all the document IDs into its own file for NOT queries in search
-    f_doc_ids = open(os.path.join(os.path.dirname(__file__), "doc_ids"), "wb")
-
-    # Save all docIDs out to a doc_ids file
-    pickle.dump(doc_ids, f_doc_ids)
-
-    # Close the doc_ids file
-    f_doc_ids.close()
 
     # Create a dictionary of terms
     dictionary = {}
@@ -72,7 +157,21 @@ def build_index(in_dir, out_dict, out_postings):
     ps = nltk.stem.PorterStemmer()
 
     # Process every document and create a dictionary of posting lists
-    for doc_id in doc_ids[:100]:  # TODO: REMOVE THE LIMIT
+    # TODO: REMOVE THE LIMIT
+    for index, doc_id in enumerate(doc_ids):
+
+        # Track progress while indexing
+        progress = index + 1 / len(doc_ids)
+        progress_bar_len = int(progress * 20)
+        print(
+            "Processing documents [{}{}] {}/{}".format(
+                "=" * progress_bar_len,
+                " " * (20 - progress_bar_len),
+                index + 1,
+                len(doc_ids),
+            )
+        )
+
         f = open(os.path.join(in_dir, str(doc_id)), "r")  # Open the document file
         text = f.read()  # Read the document in fulltext
         text = text.lower()  # Convert text to lower case
@@ -101,14 +200,44 @@ def build_index(in_dir, out_dict, out_postings):
         # Close file
         f.close()
 
-    # TODO: TEST PRINT FOR POSTINGS LISTS
-    # for key in dictionary.keys():
-    #     print("{}:".format(key))
-    #     curr = dictionary[key].head
-    #     while curr != None:
-    #         print(curr.doc_id, curr.term_freq, end=" | ")
-    #         curr = curr.next
-    #     print()
+    # Update progress
+    print("Pre-processing complete. Now adding skip pointers and indexing...")
+
+    # Create dictionary of K:V {term: Address to PostingsList of that term}
+    term_dict = {}
+
+    # For each term, split into term_dict and PostingsList, and write out to their respective files
+    for index, term in enumerate(dictionary.keys()):
+        # Track progress while adding skip pointers and saving to postings file
+        progress = index + 1 / len(dictionary.keys())
+        progress_bar_len = int(progress * 20)
+
+        print(
+            "Indexing terms [{}{}] {}/{}".format(
+                "=" * progress_bar_len,
+                " " * (20 - progress_bar_len),
+                index + 1,
+                len(dictionary.keys()),
+            )
+        )
+
+        # Add skip pointers for each of the terms' posting lists
+        dictionary[term].create_skip_ptrs()
+
+        # Write PostingsList for each term out to disk and get its address
+        ptr = write_postings_list_to_disk(dictionary[term], out_postings)
+
+        # Update term_dict with the address of the PostingsList for that term
+        term_dict[term] = ptr
+
+    # Update progress
+    print("Posting lists saved to disk. Now saving term dictionary to disk...")
+
+    # Now the term_dict has the pointers to each terms' PostingsList
+    # Write out the dictionary to the dictionary file on disk
+    write_dictionary_to_disk(term_dict, out_dict)
+
+    print("Indexing complete.")
 
 
 input_directory = output_file_dictionary = output_file_postings = None
