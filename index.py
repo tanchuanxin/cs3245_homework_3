@@ -7,6 +7,9 @@ import getopt
 import pickle
 import math
 
+from progress.bar import Bar
+from progress.spinner import Spinner
+
 
 def usage():
     print(
@@ -98,6 +101,33 @@ class PostingsList:
         print("=============================")
 
 
+# Writes out the total number of documents in the collection to the postings file
+# This is basically N, to compute inverse document frequency
+def write_collection_size_to_disk(collection_size: int, out_postings):
+    # Open our postings file
+    f_postings = open(os.path.join(os.path.dirname(__file__), out_postings), "wb")
+
+    # Writes out PostingsList for this term to postings file
+    pickle.dump(collection_size, f_postings)
+
+    # Close our postings file
+    f_postings.close()
+
+
+# Writes out the length of each document as a dictionary to a file
+def write_doc_lengths_to_disk(doc_lengths: dict):
+    # Open our document lengths file
+    f_doc_lengths = open(
+        os.path.join(os.path.dirname(__file__), "doc_lengths.txt"), "wb"
+    )
+
+    # Write out document lengths dictionary to the document lengths file
+    pickle.dump(doc_lengths, f_doc_lengths)
+
+    # Close the file
+    f_doc_lengths.close()
+
+
 # Takes in a PostingsList for a term and writes it out to our postings file
 # Returns an address to the PostingsList on disk
 def write_postings_list_to_disk(postings_list: PostingsList, out_postings):
@@ -115,9 +145,6 @@ def write_postings_list_to_disk(postings_list: PostingsList, out_postings):
     # Close our postings file
     f_postings.close()
 
-    # TODO: REMOVE THIS
-    # postings_list.display()
-
     # Return address of PostingsList we just wrote out
     return pointer
 
@@ -133,10 +160,6 @@ def write_dictionary_to_disk(term_dict: dict, out_dict):
     # Close our dictionary file
     f_dict.close()
 
-    # TODO: REMOVE THIS
-    # for key in term_dict.keys():
-    #     print(key, term_dict[key])
-
 
 def build_index(in_dir, out_dict, out_postings):
     """
@@ -146,42 +169,55 @@ def build_index(in_dir, out_dict, out_postings):
     print("Indexing...")
 
     # Read in documents to index
-    doc_ids = os.listdir(in_dir)  # Read in paths of all documents in the in_dir
-    doc_ids = [int(doc_id) for doc_id in doc_ids]
-    doc_ids.sort()
+    file_doc_ids = os.listdir(in_dir)  # Read in paths of all documents in the in_dir
 
-    # Create a dictionary of terms
-    dictionary = {}
+    load_documents_bar = Bar("Loading in documents", max=len(file_doc_ids))
+
+    doc_ids = []
+    for doc_id in file_doc_ids:
+        doc_ids.append(int(doc_id))
+        load_documents_bar.next()
+
+    doc_ids.sort()
+    load_documents_bar.finish()
+
+    print("Documents loaded. Writing out total collection size to disk...")
+
+    # Write out collection size (number of documents) to disk
+    write_collection_size_to_disk(len(doc_ids), out_postings)
+
+    print("Total collection size is {}.".format(len(doc_ids)))
 
     # Initialize porter stemmer
     ps = nltk.stem.PorterStemmer()
 
+    print("Stemming terms and tracking document lengths...")
+
+    # Track progress while indexing
+    processing_bar = Bar("Processing documents", max=len(doc_ids))
+
+    # Create a dictionary of terms and another dictionary for document lengths
+    dictionary = {}
+    doc_lengths = {}
+
     # Process every document and create a dictionary of posting lists
-    # TODO: REMOVE THE LIMIT
-    for index, doc_id in enumerate(doc_ids):
-
-        # Track progress while indexing
-        progress = index + 1 / len(doc_ids)
-        progress_bar_len = int(progress * 20)
-        print(
-            "Processing documents [{}{}] {}/{}".format(
-                "=" * progress_bar_len,
-                " " * (20 - progress_bar_len),
-                index + 1,
-                len(doc_ids),
-            )
-        )
-
+    for doc_id in doc_ids:
         f = open(os.path.join(in_dir, str(doc_id)), "r")  # Open the document file
+
         text = f.read()  # Read the document in fulltext
         text = text.lower()  # Convert text to lower case
         sentences = nltk.sent_tokenize(text)  # Tokenize by sentence
+
+        doc_length = 0  # Track number of words in this document
 
         for sentence in sentences:
             words = nltk.word_tokenize(sentence)  # Tokenize by word
             words_stemmed = [ps.stem(w) for w in words]  # Stem every word
 
             for word in words_stemmed:
+                # Update document length
+                doc_length += 1
+
                 # If new term, add term to dictionary and initialize new postings list for that term
                 if word not in dictionary:
                     dictionary[word] = PostingsList()
@@ -197,30 +233,31 @@ def build_index(in_dir, out_dict, out_postings):
                         new_node = ListNode(doc_id=doc_id, term_freq=1)
                         dictionary[word].append(new_node)
 
-        # Close file
-        f.close()
+        # Update document length in doc_length dictionary
+        doc_lengths[doc_id] = doc_length
 
-    # Update progress
-    print("Pre-processing complete. Now adding skip pointers and indexing...")
+        # Close file and update progress bar
+        f.close()
+        processing_bar.next()
+
+    # Update progress bar
+    processing_bar.finish()
+    print("Pre-processing complete. Writing document lengths to disk...")
+
+    # Save doc_lengths to disk
+    write_doc_lengths_to_disk(doc_lengths)
+
+    print("{} document lengths written to disk.".format(len(doc_ids)))
 
     # Create dictionary of K:V {term: Address to PostingsList of that term}
     term_dict = {}
 
+    # Track progress while indexing
+    print("Indexing terms and saving each postings list to disk...")
+    indexing_bar = Bar("Indexing terms", max=len(dictionary.keys()))
+
     # For each term, split into term_dict and PostingsList, and write out to their respective files
-    for index, term in enumerate(dictionary.keys()):
-        # Track progress while adding skip pointers and saving to postings file
-        progress = index + 1 / len(dictionary.keys())
-        progress_bar_len = int(progress * 20)
-
-        print(
-            "Indexing terms [{}{}] {}/{}".format(
-                "=" * progress_bar_len,
-                " " * (20 - progress_bar_len),
-                index + 1,
-                len(dictionary.keys()),
-            )
-        )
-
+    for term in dictionary.keys():
         # Add skip pointers for each of the terms' posting lists
         dictionary[term].create_skip_ptrs()
 
@@ -230,8 +267,15 @@ def build_index(in_dir, out_dict, out_postings):
         # Update term_dict with the address of the PostingsList for that term
         term_dict[term] = ptr
 
-    # Update progress
-    print("Posting lists saved to disk. Now saving term dictionary to disk...")
+        # Update progress bar
+        indexing_bar.next()
+
+    # Update progress bar
+    indexing_bar.finish()
+    print("Posting lists saved to disk.")
+
+    # Track progress while indexing
+    print("Saving term dictionary to disk...")
 
     # Now the term_dict has the pointers to each terms' PostingsList
     # Write out the dictionary to the dictionary file on disk
