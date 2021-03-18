@@ -19,93 +19,45 @@ def usage():
     )
 
 
-# Create a linked list node containing docID and term frequency within the document
-class ListNode:
-    def __init__(self, doc_id=None, term_freq=None, skip_ptr=None):
+# Create a list node containing docID and term frequency within the document
+class Posting:
+    def __init__(self, doc_id=None, term_freq=None):
         self.doc_id = doc_id
         self.term_freq = term_freq
-        self.skip_ptr = skip_ptr
-        self.next = None
 
 
-# Create a linked list class with the total length of the postings list (doc_freq)
+# Create a postings list class with the total length of the postings list (doc_freq)
 class PostingsList:
     def __init__(self):
-        self.doc_freq = None
-        self.head = None  # Head of linked list
-        self.end = None  # Last node in linked list
+        self.doc_freq = 0
+        self.postings_list = []  # Stores the postings for this term
 
     # Appends a new node to the end of the linked list
-    def append(self, new_node: ListNode):
-        # If nothing in linked list, add to head
-        if self.end == None:
-            self.head = new_node
-            self.end = new_node
-            self.doc_freq = 1
-        else:
-            self.end.next = new_node
-            self.end = new_node  # Change last node in linked list
-            self.doc_freq += 1  # Increment document frequency for this linked list
-
-    # Creates skip pointers within a completed postings list
-    def create_skip_ptrs(self):
-        skip_ptrs_num = int(math.sqrt(self.doc_freq))
-        skip_ptrs_interval = self.doc_freq // skip_ptrs_num
-
-        # If it's the only element in the postings list, we don't need skip pointers
-        if self.doc_freq <= 1:
-            skip_ptrs_num = 0
-
-        # Add skip pointers into linked list
-        skip_ptrs_added = 0
-
-        # Interval between prev and curr to see if we should add a skip pointer
-        interval = 0
-        curr_index = 0  # Checks which node we are at
-        prev_index = 0  # Tracks which node we are inserting the skip pointer for
-
-        curr = self.head
-        prev = curr
-
-        while curr != None:
-            # If added all skip pointers already, just end function
-            if skip_ptrs_added >= skip_ptrs_num:
-                break
-
-            # Add new skip pointer if interval matches or we are at the end of the linked list
-            if interval >= skip_ptrs_interval or curr == self.end:
-                prev.skip_ptr = curr  # Set prev's skip pointer to curr
-                prev = curr
-                prev_index = curr_index  # Update prev's new index to curr
-                skip_ptrs_added += 1
-                interval = 0  # Reset
-
-            # If we are not adding a skip pointer, simply increment curr
-            curr = curr.next
-            curr_index += 1
-
-            # Update interval
-            interval = curr_index - prev_index
+    def append(self, new_posting: Posting):
+        # Add to postings list
+        self.postings_list.append(new_posting)
+        self.doc_freq += 1  # Increment document frequency for this linked list
 
     # Prints out a postings list for debugging
     def display(self):
-        curr = self.head
-        while curr.next != None:
+        if len(self.postings_list) > 0:
+            for posting in self.postings_list[:-1]:
+                print("{}, {}".format(posting.doc_id, posting.term_freq), end=" | ")
             print(
-                "{}, {}, ({})".format(curr.doc_id, curr.term_freq, curr.skip_ptr),
-                end=" | ",
+                "{}, {}".format(
+                    self.postings_list[-1].doc_id, self.postings_list[-1].term_freq
+                )
             )
-            curr = curr.next
-        if curr != None:
-            print("{}, {}, ({})".format(curr.doc_id, curr.term_freq, curr.skip_ptr))
-        print("=============================")
+        else:
+            print("Empty postings list!")
+        print("========================")
 
 
 # Writes out the total number of documents in the collection to the postings file
 # This is basically N, to compute inverse document frequency
 def write_collection_size_to_disk(collection_size: int, out_postings):
     # Open our postings file
-    f_postings = open(os.path.join(os.path.dirname(__file__), out_postings), "wb")
+    f_postings = open(out_postings, "wb")
 
     # Writes out PostingsList for this term to postings file
     pickle.dump(collection_size, f_postings)
@@ -132,7 +84,7 @@ def write_doc_lengths_to_disk(doc_lengths: dict):
 # Returns an address to the PostingsList on disk
 def write_postings_list_to_disk(postings_list: PostingsList, out_postings):
     # Open our postings file
-    f_postings = open(os.path.join(os.path.dirname(__file__), out_postings), "a+b")
+    f_postings = open(out_postings, "a+b")
 
     # Get the byte offset of the final position in our postings file on disk
     # This will be where the PostingsList is appended to
@@ -152,7 +104,7 @@ def write_postings_list_to_disk(postings_list: PostingsList, out_postings):
 # Writes our the term dictionary {term: Address of PostingsList for that term} to disk
 def write_dictionary_to_disk(term_dict: dict, out_dict):
     # Open our dictionary file
-    f_dict = open(os.path.join(os.path.dirname(__file__), out_dict), "wb")
+    f_dict = open(out_dict, "wb")
 
     # Writes out the term dictionary to dictionary file
     pickle.dump(term_dict, f_dict)
@@ -208,32 +160,54 @@ def build_index(in_dir, out_dict, out_postings):
         text = text.lower()  # Convert text to lower case
         sentences = nltk.sent_tokenize(text)  # Tokenize by sentence
 
-        doc_length = 0  # Track number of words in this document
+        terms = []  # Keep track of unique terms in document
 
         for sentence in sentences:
             words = nltk.word_tokenize(sentence)  # Tokenize by word
             words_stemmed = [ps.stem(w) for w in words]  # Stem every word
 
             for word in words_stemmed:
-                # Update document length
-                doc_length += 1
+                # Track unique terms
+                terms.append(word)
 
                 # If new term, add term to dictionary and initialize new postings list for that term
                 if word not in dictionary:
                     dictionary[word] = PostingsList()
-                    new_node = ListNode(doc_id=doc_id, term_freq=1)
-                    dictionary[word].append(new_node)
+                    new_posting = Posting(doc_id=doc_id, term_freq=1)
+                    dictionary[word].append(new_posting)
                 # If term in dictionary, check if document for that term is already inside
                 else:
                     # If doc_id already exists in postings list, simply increment term frequency in doc
-                    if dictionary[word].end.doc_id == doc_id:
-                        dictionary[word].end.term_freq += 1
+                    if dictionary[word].postings_list[-1].doc_id == doc_id:
+                        dictionary[word].postings_list[-1].term_freq += 1
                     # Else, create new document in postings list and set term frequency to 1
                     else:
-                        new_node = ListNode(doc_id=doc_id, term_freq=1)
-                        dictionary[word].append(new_node)
+                        new_posting = Posting(doc_id=doc_id, term_freq=1)
+                        dictionary[word].append(new_posting)
 
-        # Update document length in doc_length dictionary
+        # Make set only unique terms
+        terms = list(set(terms))
+
+        # Calculate document length (sqrt of all weights squared)
+        doc_length = 0
+        for term in terms:
+            # If term appears in doc, calculate its weight in the document W(t,d)
+            if dictionary[term].postings_list[-1].doc_id == doc_id:
+                term_weight_in_doc = 0
+                if dictionary[term].postings_list[-1].term_freq > 0:
+                    # Take the log frequecy weight of term t in doc
+                    # Note that we ignore inverse document frequency for documents
+                    term_weight_in_dic = 1 + math.log(
+                        dictionary[term].postings_list[-1].term_freq, 10
+                    )
+
+                # Add term weight in document squared to total document length
+                doc_length += term_weight_in_doc ** 2
+
+        # Take sqrt of doc_length for final doc length
+        doc_length = math.sqrt(doc_length)
+
+        # Add final doc_length to doc_lengths dictionary
         doc_lengths[doc_id] = doc_length
 
         # Close file and update progress bar
@@ -258,9 +232,6 @@ def build_index(in_dir, out_dict, out_postings):
 
     # For each term, split into term_dict and PostingsList, and write out to their respective files
     for term in dictionary.keys():
-        # Add skip pointers for each of the terms' posting lists
-        dictionary[term].create_skip_ptrs()
-
         # Write PostingsList for each term out to disk and get its address
         ptr = write_postings_list_to_disk(dictionary[term], out_postings)
 

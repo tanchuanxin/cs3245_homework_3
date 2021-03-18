@@ -1,0 +1,4 @@
+python index.py -i "C:\Users\teoch\AppData\Roaming\nltk_data\corpora\reuters\training\" -d dictionary.txt -p postings.txt
+python search.py -d dictionary.txt -p postings.txt -q queries.txt -o results.txt
+python search.py -d dictionary.txt -p postings.txt -q queries_1.txt -o results.txt
+python search.py -d dictionary.txt -p postings.txt -q queries_2.txt -o results.txt
