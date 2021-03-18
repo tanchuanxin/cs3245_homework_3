@@ -19,40 +19,6 @@ def usage():
     )
 
 
-# Create a list node containing docID and term frequency within the document
-class Posting:
-    def __init__(self, doc_id=None, term_freq=None):
-        self.doc_id = doc_id
-        self.term_freq = term_freq
-
-
-# Create a postings list class with the total length of the postings list (doc_freq)
-class PostingsList:
-    def __init__(self):
-        self.doc_freq = 0
-        self.postings_list = []  # Stores the postings for this term
-
-    # Appends a new node to the end of the linked list
-    def append(self, new_posting: Posting):
-        # Add to postings list
-        self.postings_list.append(new_posting)
-        self.doc_freq += 1  # Increment document frequency for this linked list
-
-    # Prints out a postings list for debugging
-    def display(self):
-        if len(self.postings_list) > 0:
-            for posting in self.postings_list[:-1]:
-                print("{}, {}".format(posting.doc_id, posting.term_freq), end=" | ")
-            print(
-                "{}, {}".format(
-                    self.postings_list[-1].doc_id, self.postings_list[-1].term_freq
-                )
-            )
-        else:
-            print("Empty postings list!")
-        print("========================")
-
-
 # Writes out the total number of documents in the collection to the postings file
 # This is basically N, to compute inverse document frequency
 def write_collection_size_to_disk(collection_size: int, out_postings):
@@ -82,7 +48,7 @@ def write_doc_lengths_to_disk(doc_lengths: dict):
 
 # Takes in a PostingsList for a term and writes it out to our postings file
 # Returns an address to the PostingsList on disk
-def write_postings_list_to_disk(postings_list: PostingsList, out_postings):
+def write_postings_list_to_disk(postings_list: dict, out_postings):
     # Open our postings file
     f_postings = open(out_postings, "a+b")
 
@@ -172,18 +138,28 @@ def build_index(in_dir, out_dict, out_postings):
 
                 # If new term, add term to dictionary and initialize new postings list for that term
                 if word not in dictionary:
-                    dictionary[word] = PostingsList()
-                    new_posting = Posting(doc_id=doc_id, term_freq=1)
-                    dictionary[word].append(new_posting)
+                    dictionary[word] = {}  # Initialize new postings list
+
+                    # Update document freq for this new word to 1
+                    dictionary[word]["doc_freq"] = 1
+
+                    # Create an empty posting list
+                    dictionary[word]["postings_list"] = []
+
+                    # Add term freq to posting
+                    dictionary[word]["postings_list"].append([doc_id, 1])
                 # If term in dictionary, check if document for that term is already inside
                 else:
                     # If doc_id already exists in postings list, simply increment term frequency in doc
-                    if dictionary[word].postings_list[-1].doc_id == doc_id:
-                        dictionary[word].postings_list[-1].term_freq += 1
-                    # Else, create new document in postings list and set term frequency to 1
+                    if dictionary[word]["postings_list"][-1][0] == doc_id:
+                        dictionary[word]["postings_list"][-1][1] += 1
+                    # Create new document in postings list and set term frequency to 1
                     else:
-                        new_posting = Posting(doc_id=doc_id, term_freq=1)
-                        dictionary[word].append(new_posting)
+                        # Add term freq to posting
+                        dictionary[word]["postings_list"].append([doc_id, 1])
+
+                        # Update document frequency
+                        dictionary[word]["doc_freq"] += 1
 
         # Make set only unique terms
         terms = list(set(terms))
@@ -192,13 +168,14 @@ def build_index(in_dir, out_dict, out_postings):
         doc_length = 0
         for term in terms:
             # If term appears in doc, calculate its weight in the document W(t,d)
-            if dictionary[term].postings_list[-1].doc_id == doc_id:
+            if dictionary[term]["postings_list"][-1][0] == doc_id:
                 term_weight_in_doc = 0
-                if dictionary[term].postings_list[-1].term_freq > 0:
+                # If term frequency is more than 0 then we add to the weight
+                if dictionary[term]["postings_list"][-1][1] > 0:
                     # Take the log frequecy weight of term t in doc
                     # Note that we ignore inverse document frequency for documents
-                    term_weight_in_dic = 1 + math.log(
-                        dictionary[term].postings_list[-1].term_freq, 10
+                    term_weight_in_doc = 1 + math.log(
+                        dictionary[term]["postings_list"][-1][1], 10
                     )
 
                 # Add term weight in document squared to total document length
@@ -223,7 +200,7 @@ def build_index(in_dir, out_dict, out_postings):
 
     print("{} document lengths written to disk.".format(len(doc_ids)))
 
-    # Create dictionary of K:V {term: Address to PostingsList of that term}
+    # Create dictionary of K:V {term: Address to postings list of that term}
     term_dict = {}
 
     # Track progress while indexing

@@ -50,16 +50,26 @@ def load_doc_lengths():
     return doc_lengths
 
 
-# Loads in a PostingsList given the address offset in the postings file
+# Loads in the number of documents N
+def load_num_docs(postings_file):
+    # Number of documents stored as an integer in postings file
+    f_postings = open(postings_file, "rb")
+    num_docs = pickle.load(f_postings)  # Read in number of docs
+    f_postings.close()
+
+    return num_docs
+
+
+# Loads in a postings list given the address offset in the postings file
 def load_postings_list(postings_file, address):
-    # Open our doc lengths file
+    # Open our postings file
     f_postings = open(postings_file, "rb")
 
     # Read in PostingsList
     f_postings.seek(address, 0)  # Seek to start of PostingsList
     postings_list = pickle.load(f_postings)  # Read in PostingsList
 
-    # Close our doc lengths file
+    # Close our postings file
     f_postings.close()
 
     # Return the postings list for that term
@@ -78,8 +88,18 @@ def load_queries(queries_file):
 
     # Read in queries into an array
     queries = []
+
+    # Initialize porter stemmer
+    ps = nltk.stem.PorterStemmer()
+
+    # Need to carry out stemming on query terms
     for query in all_queries:
-        queries.append(query.rstrip())  # Remove trailing newline characters
+        query = query.rstrip()  # Remove trailing newline characters
+        query = query.lower()  # Convert text to lower case
+        query = nltk.word_tokenize(query)  # Tokenize by word
+
+        query_stemmed = [ps.stem(term) for term in query]  # Stem every word
+        queries.append(query_stemmed)
         load_queries_bar.next()
 
     load_queries_bar.finish()
@@ -89,6 +109,26 @@ def load_queries(queries_file):
 
     # Return the queries array
     return queries
+
+
+# Writes out the results
+def write_results_to_disk(results: list, results_file):
+    f_results = open(results_file, "w")
+
+    # Write each result as a line
+    for i, result in enumerate(results):
+        output = ""
+        for doc_id in result:
+            output += str(doc_id) + " "
+
+        if i < len(results) - 1:
+            output = output.rstrip() + "\n"  # Remove trailing spaces and add newline
+        else:
+            output = output.rstrip()  # No need newline, just remove trailing spaces
+
+        f_results.write(output)
+
+    f_results.close()
 
 
 def run_search(dict_file, postings_file, queries_file, results_file):
@@ -108,6 +148,10 @@ def run_search(dict_file, postings_file, queries_file, results_file):
 
     print("Document lengths loaded.")
 
+    # Load in number of documents
+    num_docs = load_num_docs(postings_file)
+    print(num_docs)
+
     # Load in queries
     queries = load_queries(queries_file)
 
@@ -115,19 +159,87 @@ def run_search(dict_file, postings_file, queries_file, results_file):
 
     queries_progress_bar = Bar("Querying", max=len(queries))
 
+    # Store results of each query
+    results = []
+
     # For each query, conduct lnc.ltc ranking scheme with cosine normalization and take top 10 results
     for query in queries:
+        # Store result of this query
+        result = []
+
         # Create scores dictionary to store scores of each relevant document
         scores = {}
 
-        # Get terms in each query
-        query = query.split()
+        # Count term frequencies for each term in query
+        term_freqs = {}
 
         for term in query:
-            
+            if term in term_freqs:
+                term_freqs[term] += 1
+            else:
+                term_freqs[term] = 1
+
+        # Calculate w(t, q) for each term
+        for term in query:
+            # Term not found, skip it
+            if term not in dictionary:
+                continue
+
+            # Load in PostingsList of term
+            term_postings_list = load_postings_list(postings_file, dictionary[term])
+            postings_list = term_postings_list["postings_list"]  # Actual postings list
+            term_doc_freq = term_postings_list["doc_freq"]  # Document frequency of term
+
+            # Get term frequency
+            term_freq = 1 + math.log(term_freqs[term], 10)
+
+            # Get document frequency
+            doc_freq = math.log(num_docs / term_doc_freq, 10)
+
+            # Calculate weight for term in query
+            weight_term_query = term_freq * doc_freq
+
+            # Iterate through postings list for the term and compute w(t, d)
+            for posting in postings_list:
+                # Calculate w(t, d). Again, we ignore idf. posting[1] is term_freq
+                weight_term_doc = 1 + math.log(posting[1], 10)
+
+                # Add to the document's scores the dot product of w(t, d) and w(t, q).
+                # posting[0] is doc_id
+                if posting[0] not in scores:
+                    scores[posting[0]] = weight_term_doc * weight_term_query
+                else:
+                    scores[posting[0]] += weight_term_doc * weight_term_query
+
+        print("{}:".format(query))
+        print(scores)
+        print("==========================")
+
+        # Normalize the scores using doc_length
+        sorted_scores = []
+        for doc_id in scores.keys():
+            scores[doc_id] = scores[doc_id] / doc_lengths[doc_id]
+            sorted_scores.append((doc_id, scores[doc_id]))
+
+        # Sort based on highest score
+        sorted_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # If less than 10, add everything to result, else just take first 10
+        if len(sorted_scores) < 10:
+            for doc_score in sorted_scores:
+                result.append(doc_score[0])
+        else:
+            for doc_score in sorted_scores[:10]:
+                result.append(doc_score[0])
+
+        # Add to overall results
+        results.append(result)
 
         # Update progress bar
         queries_progress_bar.next()
+
+    # Write out results to disk
+    write_results_to_disk(results, results_file)
 
     queries_progress_bar.finish()
 
