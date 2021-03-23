@@ -6,7 +6,7 @@ import sys
 import getopt
 import pickle
 import math
-
+import string
 from progress.bar import Bar
 from progress.spinner import Spinner
 
@@ -129,7 +129,11 @@ def build_index(in_dir, out_dict, out_postings):
         terms = []  # Keep track of unique terms in document
 
         for sentence in sentences:
-            words = nltk.word_tokenize(sentence)  # Tokenize by word
+            words = nltk.tokenize.WordPunctTokenizer().tokenize(sentence) # Tokenize by word using WordPunct. This keeps contractions, e.g. WE'LL --> WE and 'LL            
+            # words = nltk.word_tokenize(sentence)  # Tokenize by word
+
+            words = [w for w in words if w not in string.punctuation] # clean out isolated punctuations
+            words = [w for w in words if w.strip() != ''] # clean out whitespaces            
             words_stemmed = [ps.stem(w) for w in words]  # Stem every word
 
             for word in words_stemmed:

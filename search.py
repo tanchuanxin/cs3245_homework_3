@@ -6,7 +6,8 @@ import getopt
 import pickle
 import math
 import os
-
+import string
+import heapq
 from progress.bar import Bar
 
 
@@ -96,9 +97,14 @@ def load_queries(queries_file):
     for query in all_queries:
         query = query.rstrip()  # Remove trailing newline characters
         query = query.lower()  # Convert text to lower case
-        query = nltk.word_tokenize(query)  # Tokenize by word
 
-        query_stemmed = [ps.stem(term) for term in query]  # Stem every word
+        query = nltk.tokenize.WordPunctTokenizer().tokenize(query) # Tokenize by word using WordPunct. This keeps contractions, e.g. WE'LL --> WE and 'LL
+        # query = nltk.word_tokenize(query)  # Tokenize by word
+
+        query = [term for term in query if term not in string.punctuation] # clean out isolated punctuations
+        query = [term for term in query if term.strip() != ''] # clean out whitespaces            
+        query_stemmed = [ps.stem(term) for term in query]  # Stem every term
+
         queries.append(query_stemmed)
         load_queries_bar.next()
 
@@ -193,11 +199,11 @@ def run_search(dict_file, postings_file, queries_file, results_file):
             # Get term frequency
             term_freq = 1 + math.log(term_freqs[term], 10)
 
-            # Get document frequency
-            doc_freq = math.log(num_docs / term_doc_freq, 10)
+            # Get inverted document frequency
+            inv_doc_freq = math.log(num_docs / term_doc_freq, 10)
 
-            # Calculate weight for term in query
-            weight_term_query = term_freq * doc_freq
+            # Calculate weight for term in query 
+            weight_term_query = term_freq * inv_doc_freq
 
             # Iterate through postings list for the term and compute w(t, d)
             for posting in postings_list:
@@ -215,22 +221,32 @@ def run_search(dict_file, postings_file, queries_file, results_file):
         print(scores)
         print("==========================")
 
-        # Normalize the scores using doc_length
-        sorted_scores = []
+        # Normalize the scores using doc_length       
+        scores_heap = []
+
         for doc_id in scores.keys():
             scores[doc_id] = scores[doc_id] / doc_lengths[doc_id]
-            sorted_scores.append((doc_id, scores[doc_id]))
 
-        # Sort based on highest score
-        sorted_scores.sort(key=lambda x: x[1], reverse=True)
+            # heapq is by default a minheap
+            # we push into the heap the negative version of the score, to facilitate us forming a maxheap
+            heapq.heappush(scores_heap, (-scores[doc_id], doc_id))
+            # sorted_scores.append((doc_id, scores[doc_id]))
 
-        # If less than 10, add everything to result, else just take first 10
-        if len(sorted_scores) < 10:
-            for doc_score in sorted_scores:
-                result.append(doc_score[0])
-        else:
-            for doc_score in sorted_scores[:10]:
-                result.append(doc_score[0])
+        # # Sort based on highest score
+        # sorted_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # # If less than 10, add everything to result, else just take first 10
+        # if len(sorted_scores) < 10:
+        #     for doc_score in sorted_scores:
+        #         result.append(doc_score[0])
+        # else:
+        #     for doc_score in sorted_scores[:10]:
+        #         result.append(doc_score[0])
+
+        for i in range(10):
+            if len(scores_heap) == 0:
+                break
+            result.append(heapq.heappop(scores_heap)[1])
 
         # Add to overall results
         results.append(result)
