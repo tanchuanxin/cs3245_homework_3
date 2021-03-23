@@ -129,8 +129,7 @@ def build_index(in_dir, out_dict, out_postings):
         terms = []  # Keep track of unique terms in document
 
         for sentence in sentences:
-            words = nltk.tokenize.WordPunctTokenizer().tokenize(sentence) # Tokenize by word using WordPunct. This keeps contractions, e.g. WE'LL --> WE and 'LL            
-            # words = nltk.word_tokenize(sentence)  # Tokenize by word
+            words = nltk.tokenize.WordPunctTokenizer().tokenize(sentence) # Tokenize by word using WordPunct
 
             words = [w for w in words if w not in string.punctuation] # clean out isolated punctuations
             words = [w for w in words if w.strip() != ''] # clean out whitespaces            

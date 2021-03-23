@@ -98,8 +98,7 @@ def load_queries(queries_file):
         query = query.rstrip()  # Remove trailing newline characters
         query = query.lower()  # Convert text to lower case
 
-        query = nltk.tokenize.WordPunctTokenizer().tokenize(query) # Tokenize by word using WordPunct. This keeps contractions, e.g. WE'LL --> WE and 'LL
-        # query = nltk.word_tokenize(query)  # Tokenize by word
+        query = nltk.tokenize.WordPunctTokenizer().tokenize(query)  # Tokenize by word using WordPunct
 
         query = [term for term in query if term not in string.punctuation] # clean out isolated punctuations
         query = [term for term in query if term.strip() != ''] # clean out whitespaces            
@@ -170,9 +169,6 @@ def run_search(dict_file, postings_file, queries_file, results_file):
 
     # For each query, conduct lnc.ltc ranking scheme with cosine normalization and take top 10 results
     for query in queries:
-        # Store result of this query
-        result = []
-
         # Create scores dictionary to store scores of each relevant document
         scores = {}
 
@@ -217,10 +213,6 @@ def run_search(dict_file, postings_file, queries_file, results_file):
                 else:
                     scores[posting[0]] += weight_term_doc * weight_term_query
 
-        print("{}:".format(query))
-        print(scores)
-        print("==========================")
-
         # Normalize the scores using doc_length       
         scores_heap = []
 
@@ -228,25 +220,50 @@ def run_search(dict_file, postings_file, queries_file, results_file):
             scores[doc_id] = scores[doc_id] / doc_lengths[doc_id]
 
             # heapq is by default a minheap
-            # we push into the heap the negative version of the score, to facilitate us forming a maxheap
+            # we push into the heap the negative of the score, to facilitate us forming a maxheap
             heapq.heappush(scores_heap, (-scores[doc_id], doc_id))
             # sorted_scores.append((doc_id, scores[doc_id]))
 
-        # # Sort based on highest score
-        # sorted_scores.sort(key=lambda x: x[1], reverse=True)
+        # Store result of this query
+        result = []
 
-        # # If less than 10, add everything to result, else just take first 10
-        # if len(sorted_scores) < 10:
-        #     for doc_score in sorted_scores:
-        #         result.append(doc_score[0])
-        # else:
-        #     for doc_score in sorted_scores[:10]:
-        #         result.append(doc_score[0])
+        # curr values we are checking against, in case of the same score for multiple documents
+        curr_score = None
+        curr_doc_id_list = []
 
-        for i in range(10):
+        # pop the top of the heap. loop until we have >=10 elements in result. consider repeated scores as well
+        while (len(result) < 10):
+            # no more in the heap, exit while loop
             if len(scores_heap) == 0:
                 break
-            result.append(heapq.heappop(scores_heap)[1])
+
+            # curr[0] is the score, curr[1] is the doc_id
+            # we pop the heap to get the maximum score. remember that it is represented by a negative number now
+            curr = heapq.heappop(scores_heap)
+            
+            # we have no score to compare against at the moment
+            if curr_score == None:
+                curr_score = curr[0]
+                curr_doc_id_list.append(curr[1])
+            # there are scores to compare against
+            else:
+                # if it is a repeated score, append to list
+                if curr[0] == curr_score:
+                    curr_doc_id_list.append(curr[1])
+                # if it is not a repeated score, push values into the 'result' container
+                else:
+                    # sort in increasing order of doc_ids for repeated scores and output 
+                    curr_doc_id_list.sort()
+                    for doc_id in curr_doc_id_list:
+                        result.append(doc_id)
+                    
+                    # clear up and replace with new curr
+                    curr_score = curr[0]
+                    curr_doc_id_list = [curr[1]]
+        
+        # result might have more than 10 elements, just slice the first 10
+        if len(result) > 10:
+            result = result[:10]
 
         # Add to overall results
         results.append(result)
