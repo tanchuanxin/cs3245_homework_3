@@ -98,10 +98,9 @@ def load_queries(queries_file):
         query = query.rstrip()  # Remove trailing newline characters
         query = query.lower()  # Convert text to lower case
 
-        query = nltk.tokenize.WordPunctTokenizer().tokenize(query)  # Tokenize by word using WordPunct
+        query = nltk.word_tokenize(query) # Tokenize by word 
 
         query = [term for term in query if term not in string.punctuation] # clean out isolated punctuations
-        query = [term for term in query if term.strip() != ''] # clean out whitespaces            
         query_stemmed = [ps.stem(term) for term in query]  # Stem every term
 
         queries.append(query_stemmed)
@@ -222,7 +221,6 @@ def run_search(dict_file, postings_file, queries_file, results_file):
             # heapq is by default a minheap
             # we push into the heap the negative of the score, to facilitate us forming a maxheap
             heapq.heappush(scores_heap, (-scores[doc_id], doc_id))
-            # sorted_scores.append((doc_id, scores[doc_id]))
 
         # Store result of this query
         result = []
@@ -261,6 +259,11 @@ def run_search(dict_file, postings_file, queries_file, results_file):
                     curr_score = curr[0]
                     curr_doc_id_list = [curr[1]]
         
+        # insert the terminal case
+        curr_doc_id_list.sort()
+        for doc_id in curr_doc_id_list:
+            result.append(doc_id)
+
         # result might have more than 10 elements, just slice the first 10
         if len(result) > 10:
             result = result[:10]

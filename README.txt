@@ -26,11 +26,12 @@ Additional notes
 	We have opted for the following process and libraries for document processing
 		stemmer: ps = nltk.stem.PorterStemmer() # porter stemmer
 		sentences: nltk.sent_tokenize() # sentence tokenizer
-		words: words = nltk.tokenize.WordPunctTokenizer().tokenize(sentence) # Tokenize by word using WordPunct
+		words: words = nltk.word_tokenize(sentence) # Tokenize by word
 			words = [w for w in words if w not in string.punctuation] # clean out isolated punctuations
 			words = [w for w in words if w.strip() != ''] # clean out whitespaces            
 			words_stemmed = [ps.stem(w) for w in words]  # Stem every word
 	Our document processing did not remove numbers
+	We have used the same processing on both the input documents as well as the queries
 
 2. Reading postings.txt
 	We have noted the requirement to read postings.txt through pointer seeks instead of loading the whole file into memory
@@ -66,6 +67,7 @@ dictionary.txt		the corpus, obtained from parsing reuters data
 postings.txt		the postings file, pointed to by dictionary entries
 README.txt		this file you are reading
 dictionary.txt		auxilliary file used to support cosine score calculation in search.py
+requirements.txt	our python environment can be recreated from this file, if needed
 
 == Statement of individual work ==
 
